@@ -1,0 +1,6 @@
+doc/maintainers/
+**/.dart_tool/
+**/.idea/
+**/build/
+example/android/local.properties
+example/ios/Pods/
