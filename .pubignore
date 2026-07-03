@@ -1,6 +1,12 @@
 doc/maintainers/
+/pubspec.lock
+example/pubspec.lock
 **/.dart_tool/
 **/.idea/
 **/build/
+**/.flutter-plugins-dependencies
+**/.metadata
+**/*.iml
 example/android/local.properties
 example/ios/Pods/
+example/ios/Podfile.lock
