@@ -488,6 +488,13 @@ platforms are not part of the V1 compatibility contract.
 applications must still validate their backend contracts, encryption envelopes,
 authentication decisions, retry safety, cache policy, and offline behavior.
 
+## Contributing and Security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull-request checks.
+Report vulnerabilities according to [SECURITY.md](SECURITY.md); never place
+tokens, encryption material, personal data, or exploit details in a public
+issue.
+
 ## License
 
 Nexio is available under the [MIT License](LICENSE).

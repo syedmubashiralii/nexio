@@ -8,31 +8,32 @@ The authoritative references are Dart's
 [package layout](https://dart.dev/tools/pub/package-layout), and
 [pub points](https://pub.dev/help/scoring) documentation.
 
-## 1. Create the Source Repository
+## 1. Verify the Source Repository
 
-The intended GitHub URL must exist before it is added to `pubspec.yaml`. At the
-time this guide was written, `https://github.com/syedmubashiralii/nexio` returned
-404, so the release metadata contains only the verified homepage.
-
-Create and push the repository with GitHub CLI:
+The repository URL must remain reachable before every release. Verify the local
+remote and public endpoint:
 
 ```bash
-cd /Users/syedmubashirali/Desktop/Plugins/nexio
-git init -b main
-git add .
-git commit -m "release: prepare nexio 0.1.0"
-gh auth status
-gh repo create syedmubashiralii/nexio --public --source=. --remote=origin --push
+cd /path/to/nexio
+git remote get-url origin
+curl -I https://github.com/syedmubashiralii/nexio
 ```
 
-Then add these fields to `pubspec.yaml` and verify both links in a browser:
+`pubspec.yaml` must contain these valid destinations:
 
 ```yaml
 repository: https://github.com/syedmubashiralii/nexio
 issue_tracker: https://github.com/syedmubashiralii/nexio/issues
 ```
 
-Do not publish with a placeholder or 404 URL.
+Do not publish with a placeholder or 404 URL. Commit and push the verified
+release state before uploading it to pub.dev:
+
+```bash
+git add .
+git commit -m "release: prepare nexio 0.1.0"
+git push origin main
+```
 
 ## 2. Verify Release Metadata
 
@@ -49,24 +50,25 @@ Confirm:
 Check package-name availability:
 
 ```bash
-open https://pub.dev/packages/nexio
+curl -I https://pub.dev/packages/nexio
 ```
 
-A package page already owned by another publisher means a different package
-name is required.
+A 404 response means no package page currently exists; it does not reserve the
+name. A package page already owned by another publisher means a different
+package name is required. The name is secured only after successful publication.
 
 ## 3. Run Package Preflight
 
 From the package root:
 
 ```bash
-cd /Users/syedmubashirali/Desktop/Plugins/nexio
+cd /path/to/nexio
 dart format --output=none --set-exit-if-changed lib test example
 flutter analyze
 flutter test
 dart doc --output /tmp/nexio-api-docs
 flutter pub outdated
-dart pub publish --dry-run
+flutter pub publish --dry-run
 ```
 
 The dry run must list only intended files and finish with zero warnings.
@@ -74,7 +76,7 @@ The dry run must list only intended files and finish with zero warnings.
 ## 4. Verify the Example Host
 
 ```bash
-cd /Users/syedmubashirali/Desktop/Plugins/nexio/example
+cd /path/to/nexio/example
 flutter pub get
 flutter analyze
 flutter test
@@ -96,7 +98,7 @@ The official scoring guidance warns that `pana` can modify the analyzed
 package. Run it on a temporary copy:
 
 ```bash
-cd /Users/syedmubashirali/Desktop/Plugins/nexio
+cd /path/to/nexio
 PANA_DIR="$(mktemp -d /tmp/nexio-pana.XXXXXX)"
 cp -R . "$PANA_DIR/nexio"
 dart pub global activate pana
@@ -120,9 +122,9 @@ Do not write “160/160” in package marketing until pub.dev awards it.
 Return to the package root and run:
 
 ```bash
-cd /Users/syedmubashirali/Desktop/Plugins/nexio
-dart pub publish --dry-run
-dart pub publish
+cd /path/to/nexio
+flutter pub publish --dry-run
+flutter pub publish
 ```
 
 The publish command opens the authentication flow when required, prints the

@@ -17,6 +17,8 @@ void main() {
 
   test('required adoption guides are present', () {
     const requiredFiles = <String>[
+      'CONTRIBUTING.md',
+      'SECURITY.md',
       'example/example.md',
       'doc/authentication.md',
       'doc/security.md',
@@ -60,6 +62,8 @@ void main() {
 
 Iterable<File> _publicMarkdownFiles() sync* {
   yield File('README.md');
+  yield File('CONTRIBUTING.md');
+  yield File('SECURITY.md');
   yield* Directory('doc')
       .listSync()
       .whereType<File>()

@@ -7,7 +7,7 @@ environment:
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
-  dio: ^5.9.2
+  dio: ^5.10.0
   flutter:
     sdk: flutter
   nexio:
