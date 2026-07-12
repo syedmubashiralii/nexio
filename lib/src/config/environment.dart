@@ -89,6 +89,18 @@ enum RequestPriority {
   low,
 }
 
+/// Controls whether Nexio applies authentication coordination to a request.
+enum NexioAuthMode {
+  /// Applies dynamic auth headers, refresh coordination, and the session gate.
+  authenticated,
+
+  /// Skips dynamic auth headers, refresh classification, and the session gate.
+  ///
+  /// Use this for sign-in, registration, public configuration, and app-owned
+  /// refresh endpoints.
+  anonymous,
+}
+
 /// Determines how retry delays are calculated.
 enum RetryStrategy {
   /// Retries use the same delay each time.

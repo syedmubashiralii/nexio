@@ -11,8 +11,15 @@ extension on NexioClient {
     return policy.shouldRetryException(error);
   }
 
-  bool _shouldQueueOffline(Object error) {
-    return options.offlineQueueEnabled &&
+  bool _canQueueOffline<T>(NexioRequestOptions<T> requestOptions) {
+    return options.offlineQueueEnabled && requestOptions.queueWhenOffline;
+  }
+
+  bool _shouldQueueOffline<T>(
+    Object error,
+    NexioRequestOptions<T> requestOptions,
+  ) {
+    return _canQueueOffline(requestOptions) &&
         error is DioException &&
         error.type == DioExceptionType.connectionError;
   }
@@ -36,27 +43,72 @@ extension on NexioClient {
   Future<String> _queueOffline<T>(
     NexioRequestOptions<T> requestOptions,
     String url,
+    String environmentName,
   ) {
+    final allowedHeaders = options.offlinePersistedHeaders
+        .map((header) => header.toLowerCase())
+        .toSet();
+    final requestHeaders = <String, Object?>{
+      ...?requestOptions.headers,
+      ...?requestOptions.dioOptions?.headers,
+    };
     return offlineQueue.enqueue(
       method: requestOptions.method,
       url: url,
       data: requestOptions.data,
       queryParameters: requestOptions.queryParameters,
       headers: <String, Object?>{
-        ...options.defaultHeaders,
-        ...?requestOptions.headers,
+        for (final entry in requestHeaders.entries)
+          if (allowedHeaders.contains(entry.key.toLowerCase()))
+            entry.key: entry.value,
       },
+      environmentName: environmentName,
+      encryptionMode:
+          requestOptions.encryptionMode ?? options.defaultEncryptionMode,
+      authMode: requestOptions.authMode,
+      contentType:
+          requestOptions.contentType ?? requestOptions.dioOptions?.contentType,
+      logInChucker: requestOptions.logInChucker ?? options.defaultLogInChucker,
     );
   }
 
   Future<void> _startBackgroundServices() async {
     await cacheStore.cleanupExpired().catchError((Object _) {});
     await networkMonitor.start().catchError((Object _) {});
+    if (options.offlineQueueEnabled && networkMonitor.isOnline) {
+      unawaited(offlineQueue.replay(_replayQueuedRequest));
+    }
     networkMonitor.online.listen((_) {
       if (options.offlineQueueEnabled) {
-        unawaited(offlineQueue.replay(dio));
+        unawaited(offlineQueue.replay(_replayQueuedRequest));
       }
     });
+  }
+
+  Future<Response<Object?>> _replayQueuedRequest(
+    NexioQueuedRequest request,
+  ) {
+    if (request.authMode == NexioAuthMode.authenticated &&
+        _authSessionExpired) {
+      throw const NexioSessionExpiredException();
+    }
+    final environmentName = request.environmentName ?? _environment;
+    return _dioFor(environmentName).request<Object?>(
+      request.url,
+      data: request.data,
+      queryParameters: request.queryParameters,
+      options: Options(
+        method: request.method,
+        headers: request.headers,
+        contentType: request.contentType,
+        extra: <String, Object?>{
+          NexioRequestMetadata.environmentName: environmentName,
+          NexioRequestMetadata.encryptionMode: request.encryptionMode,
+          NexioRequestMetadata.authMode: request.authMode,
+          NexioRequestMetadata.logInChucker: request.logInChucker,
+        },
+      ),
+    );
   }
 
   Dio _dioFor(String environmentName) {

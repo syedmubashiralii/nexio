@@ -77,13 +77,30 @@ different policy, or handle the miss as an offline state.
 Confirm that:
 
 - `offlineQueueEnabled` is true;
+- the request sets `queueWhenOffline: true`;
 - the failure is a Dio connection error;
 - connectivity later emits an online state;
 - request data is JSON-safe;
 - the endpoint accepts delayed replay;
-- dynamic credentials stored with the queued request are still valid.
+- the current dynamic credentials are valid when replay begins.
 
 Replay failures remain queued and emit `NexioRequestFailedEvent`.
+Nexio preserves environment and encryption metadata and regenerates dynamic
+auth headers instead of persisting them.
+
+## Authenticated Requests Are Blocked
+
+`NexioSessionExpiredException` means an auth decision expired the session or a
+refresh failed. Anonymous sign-in and public calls can continue with
+`authMode: NexioAuthMode.anonymous`. Save the new session first, then call
+`Nexio.resetAuthSession()`.
+
+## Background Parser Fails to Cross an Isolate
+
+An `isolateParser` must be a top-level or static function. Avoid closures that
+capture controllers, repositories, contexts, ports, or plugin objects. Return a
+plain isolate-sendable model graph. Use a regular `parser` when those constraints
+do not fit the endpoint.
 
 ## Download Resume Restarts or Fails
 

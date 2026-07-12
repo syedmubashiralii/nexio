@@ -32,7 +32,8 @@ export 'src/config/environment.dart';
 export 'src/config/nexio_request_options.dart';
 export 'src/config/nexio_runtime_options.dart';
 export 'src/config/retry_policy.dart';
-export 'src/encryption/encryption_engine.dart' show NexioCipher;
+export 'src/encryption/encryption_engine.dart'
+    show NexioCipher, NexioEncryptionAdapter;
 export 'src/errors/nexio_exception.dart';
 export 'src/events/nexio_events.dart';
 export 'src/interceptors/nexio_interceptor.dart';
@@ -40,6 +41,7 @@ export 'src/loader/nexio_loader.dart';
 export 'src/models/nexio_metrics.dart';
 export 'src/models/nexio_response.dart';
 export 'src/monitoring/nexio_health_monitor.dart';
+export 'src/network/network_config.dart';
 export 'src/nexio_facade.dart';
 export 'src/parser/nexio_parser.dart';
 export 'src/transfers/nexio_download.dart';

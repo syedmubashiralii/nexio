@@ -20,13 +20,42 @@ Per-request override:
 await Nexio.get<List<Item>>(
   '/large-feed',
   threadMode: ThreadMode.background,
-  parser: itemListParser,
+  isolateParser: parseItemsInIsolate,
 );
 ```
 
 `ThreadMode.auto` parses small payloads on the main isolate and large JSON
 payloads with Flutter's `compute`. Nexio also uses isolate-backed cache cleanup
 so expired disk files do not block the request path.
+
+For ordinary `parser` callbacks, Nexio offloads large JSON decoding and then
+runs model mapping on the main isolate. This is the safest default because a
+closure can capture objects that Dart cannot send between isolates.
+
+Use `isolateParser` when model construction is also expensive:
+
+```dart
+List<Item> parseItemsInIsolate(String source) {
+  final decoded = jsonDecode(source) as List<Object?>;
+  return decoded
+      .map((item) => Item.fromJson(
+            Map<String, Object?>.from(item! as Map),
+          ))
+      .toList();
+}
+
+final response = await Nexio.get<List<Item>>(
+  '/large-feed',
+  threadMode: ThreadMode.auto,
+  parseThresholdKb: 32,
+  isolateParser: parseItemsInIsolate,
+);
+```
+
+The isolate parser must be top-level or static. It receives serialized,
+decrypted response data and should perform both decoding and model construction.
+Its result must be isolate-sendable. Do not provide `parser` and
+`isolateParser` together.
 
 ## Why requests still use `await`
 
@@ -38,9 +67,8 @@ Dio network calls are asynchronous I/O. They should be awaited so your code gets
 the response, but they do not block the UI thread like synchronous CPU work.
 
 Isolates are used for CPU-heavy work. In Nexio that means large built-in JSON
-decoding when `ThreadMode.auto` crosses `parseThresholdKb`, forced background
-parsing with `ThreadMode.background`, and expired disk cache cleanup. These
-operations also return Futures, so app code still writes `await`.
+decoding, explicit full-response model parsing, and expired disk cache cleanup.
+These operations also return Futures, so app code still writes `await`.
 
 Use this mental model:
 
@@ -64,13 +92,14 @@ Nexio keeps stable Dio clients and their socket pools in the normal async I/O
 runtime. It moves work only when CPU cost justifies it:
 
 - large built-in JSON decoding;
-- forced background parsing through `ThreadMode.background`;
+- full decoding and model construction through `isolateParser`;
 - disk-cache cleanup.
 
 This keeps interceptors, cancellation tokens, Chucker, uploads, downloads, and
 custom adapters predictable while protecting Flutter frame rendering from large
 decode work.
 
-Custom model parsers run after built-in JSON decoding. Keep parsers focused on
-mapping decoded data into application types; benchmark expensive custom
-transformations separately.
+Use regular parsers for small and medium payloads. Use an isolate parser only
+after profiling shows decoding or model construction affects frame time; isolate
+startup and data copying have a cost, which is why `ThreadMode.auto` has a
+configurable threshold.

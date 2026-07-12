@@ -14,6 +14,7 @@
 - [Encryption](encryption.md)
 - [Threading and `await`](threading.md)
 - [Caching](caching.md)
+- [Connectivity and offline queue](offline-queue.md)
 - [Retries, cancellation, priority, and deduplication](retries-cancellation-priority.md)
 - [Errors](errors.md)
 

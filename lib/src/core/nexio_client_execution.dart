@@ -91,6 +91,7 @@ extension on NexioClient {
     final parsed = await parserEngine.parse<T>(
       entry.data,
       parser: requestOptions.parser,
+      isolateParser: requestOptions.isolateParser,
       threadMode: requestOptions.threadMode ?? options.defaultThreadMode,
       thresholdKb: requestOptions.parseThresholdKb ?? options.parseThresholdKb,
     );
@@ -115,10 +116,22 @@ extension on NexioClient {
     String url,
     String environmentName,
   ) async {
-    if (options.offlineQueueEnabled && !networkMonitor.isOnline) {
+    final verifyConnectivity = requestOptions.verifyConnectivity ??
+        options.networkConfig.verifyBeforeRequest;
+    final isOnline = verifyConnectivity
+        ? await networkMonitor.checkNow()
+        : networkMonitor.isOnline;
+    if (!isOnline) {
       healthMonitor.record(url, NexioHealthOutcome.offline);
-      final queueId = await _queueOffline(requestOptions, url);
-      throw NexioOfflineQueuedException(queueId);
+      if (_canQueueOffline(requestOptions)) {
+        final queueId = await _queueOffline(
+          requestOptions,
+          url,
+          environmentName,
+        );
+        throw NexioOfflineQueuedException(queueId);
+      }
+      throw const NexioOfflineException();
     }
 
     final retryPolicy = requestOptions.retryPolicy ?? options.retryPolicy;
@@ -138,8 +151,12 @@ extension on NexioClient {
         lastError = error;
         lastStackTrace = stackTrace;
         if (!_shouldRetry(error, retryPolicy, attempt)) {
-          if (_shouldQueueOffline(error)) {
-            final queueId = await _queueOffline(requestOptions, url);
+          if (_shouldQueueOffline(error, requestOptions)) {
+            final queueId = await _queueOffline(
+              requestOptions,
+              url,
+              environmentName,
+            );
             throw NexioOfflineQueuedException(queueId);
           }
           rethrow;
@@ -159,7 +176,11 @@ extension on NexioClient {
     int attempt, {
     int authRefreshAttempt = 0,
   }) async {
-    await _waitForAuthRefreshIfNeeded();
+    if (requestOptions.authMode == NexioAuthMode.authenticated &&
+        _authSessionExpired) {
+      throw const NexioSessionExpiredException();
+    }
+    await _waitForAuthRefreshIfNeeded(requestOptions.authMode);
 
     final totalWatch = Stopwatch()..start();
     final cancelToken = requestOptions.cancelToken ?? CancelToken();
@@ -221,6 +242,7 @@ extension on NexioClient {
       final parsed = await parserEngine.parse<T>(
         decrypted,
         parser: requestOptions.parser,
+        isolateParser: requestOptions.isolateParser,
         threadMode: requestOptions.threadMode ?? options.defaultThreadMode,
         thresholdKb:
             requestOptions.parseThresholdKb ?? options.parseThresholdKb,
@@ -284,6 +306,7 @@ extension on NexioClient {
       NexioRequestMetadata.logInChucker:
           requestOptions.logInChucker ?? options.defaultLogInChucker,
       NexioRequestMetadata.environmentName: environmentName,
+      NexioRequestMetadata.authMode: requestOptions.authMode,
     };
     return existing.copyWith(
       method: requestOptions.method,

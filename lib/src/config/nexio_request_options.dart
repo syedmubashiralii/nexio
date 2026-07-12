@@ -18,6 +18,8 @@ class NexioRequestOptions<T> {
   /// - [baseUrlOverride] replaces the active environment base URL for this
   ///   request only.
   /// - [encryptionMode] overrides global encryption for this request.
+  /// - [authMode] controls dynamic auth headers and session coordination.
+  ///   Defaults to [NexioAuthMode.authenticated].
   /// - [threadMode] overrides the global parser thread mode.
   /// - [retryPolicy] overrides the global retry policy.
   /// - [cachePolicy] controls cache behavior. Defaults to network only.
@@ -36,6 +38,8 @@ class NexioRequestOptions<T> {
   /// - [barrierColor] customizes the loader barrier color.
   /// - [context] is used to present a loader when no global navigator key exists.
   /// - [parser] converts the decrypted response into [T].
+  /// - [isolateParser] decodes and constructs [T] in a top-level or static
+  ///   callback selected by [threadMode]. It cannot be combined with [parser].
   /// - [parseThresholdKb] overrides the global auto-thread threshold.
   /// - [dioOptions] are merged into Dio's per-request options.
   /// - [onSendProgress] receives upload progress.
@@ -43,6 +47,10 @@ class NexioRequestOptions<T> {
   /// - [contentType] overrides Dio's request content type.
   /// - [logInChucker] overrides the global Chucker capture default for this
   ///   request. Use `false` for sensitive endpoints.
+  /// - [verifyConnectivity] overrides active pre-request reachability checks.
+  /// - [queueWhenOffline] persists this request for automatic replay when the
+  ///   offline queue capability is enabled. Defaults to `false` because replay
+  ///   of financial or other non-idempotent operations must be explicit.
   const NexioRequestOptions({
     required this.method,
     required this.path,
@@ -51,6 +59,7 @@ class NexioRequestOptions<T> {
     this.headers,
     this.baseUrlOverride,
     this.encryptionMode,
+    this.authMode = NexioAuthMode.authenticated,
     this.threadMode,
     this.retryPolicy,
     this.cachePolicy = CachePolicy.networkOnly,
@@ -67,13 +76,19 @@ class NexioRequestOptions<T> {
     this.barrierColor,
     this.context,
     this.parser,
+    this.isolateParser,
     this.parseThresholdKb,
     this.dioOptions,
     this.onSendProgress,
     this.onReceiveProgress,
     this.contentType,
     this.logInChucker,
-  });
+    this.verifyConnectivity,
+    this.queueWhenOffline = false,
+  }) : assert(
+          parser == null || isolateParser == null,
+          'Provide parser or isolateParser, not both.',
+        );
 
   /// HTTP method.
   final String method;
@@ -95,6 +110,9 @@ class NexioRequestOptions<T> {
 
   /// Request-specific encryption mode.
   final EncryptionMode? encryptionMode;
+
+  /// Authentication behavior for this request.
+  final NexioAuthMode authMode;
 
   /// Request-specific parser thread mode.
   final ThreadMode? threadMode;
@@ -144,6 +162,9 @@ class NexioRequestOptions<T> {
   /// Parser used to build [T] from the decoded response.
   final NexioParser<T>? parser;
 
+  /// Full serialized-response parser eligible for isolate execution.
+  final NexioIsolateParser<T>? isolateParser;
+
   /// Auto-thread threshold override in kilobytes.
   final int? parseThresholdKb;
 
@@ -161,4 +182,10 @@ class NexioRequestOptions<T> {
 
   /// Whether Chucker should capture this request.
   final bool? logInChucker;
+
+  /// Whether Nexio actively verifies connectivity before this request.
+  final bool? verifyConnectivity;
+
+  /// Whether this request may be persisted and replayed after connectivity.
+  final bool queueWhenOffline;
 }

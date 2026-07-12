@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:nexio/nexio.dart';
 
 /// Copyable examples for every major Nexio feature.
@@ -36,6 +37,9 @@ class NexioAllFeaturesExample {
       defaultThreadMode: ThreadMode.auto,
       parseThresholdKb: 64,
       offlineQueueEnabled: true,
+      networkConfig: NexioNetworkConfig(
+        connectivityProbe: checkBackendReachability,
+      ),
       maxConcurrentRequests: 6,
       defaultHeaders: const {'Accept': 'application/json'},
       onUnauthorized: (event) {
@@ -133,6 +137,21 @@ class NexioAllFeaturesExample {
     debugPrint('Encrypted responses: ${cbc.statusCode}, ${gcm.statusCode}');
   }
 
+  /// Replaces a built-in mode with an app-specific backend wire contract.
+  static void platformEncryption(MethodChannel cryptoChannel) {
+    Nexio.registerEncryptionAdapter(PlatformGcmAdapter(cryptoChannel));
+  }
+
+  /// Sends public traffic without dynamic auth headers or the session gate.
+  static Future<void> anonymousRequest() async {
+    final response = await Nexio.get<Map<String, Object?>>(
+      '/public/config',
+      authMode: NexioAuthMode.anonymous,
+      parser: parseMap,
+    );
+    debugPrint('Public config: ${response.statusCode}');
+  }
+
   /// Uses automatic or forced background parsing for large payloads.
   static Future<void> threading() async {
     final auto = await Nexio.get<List<User>>(
@@ -144,6 +163,7 @@ class NexioAllFeaturesExample {
     final background = await Nexio.get<List<User>>(
       '/large-users',
       threadMode: ThreadMode.background,
+      isolateParser: User.parseListInIsolate,
     );
 
     debugPrint('Parsed: ${auto.data.length}, ${background.data.length}');
@@ -255,6 +275,7 @@ class NexioAllFeaturesExample {
         '/events',
         data: const {'type': 'opened_app'},
         deduplicate: false,
+        queueWhenOffline: true,
         parser: parseMap,
       );
     } on NexioOfflineQueuedException catch (error) {
@@ -368,6 +389,11 @@ Future<Map<String, Object?>> parseMap(Object? input) async {
   return Map<String, Object?>.from(input! as Map);
 }
 
+Future<bool> checkBackendReachability() async {
+  // Replace with a lightweight app-owned health check.
+  return true;
+}
+
 class User {
   const User({required this.id, required this.name});
 
@@ -385,5 +411,37 @@ class User {
 
   factory User.fromJson(Map<String, Object?> json) {
     return User(id: json['id']! as int, name: json['name']! as String);
+  }
+
+  static List<User> parseListInIsolate(String source) {
+    final items = jsonDecode(source) as List<Object?>;
+    return items
+        .map((item) => User.fromJson(Map<String, Object?>.from(item! as Map)))
+        .toList();
+  }
+}
+
+class PlatformGcmAdapter implements NexioEncryptionAdapter {
+  const PlatformGcmAdapter(this.channel);
+
+  final MethodChannel channel;
+
+  @override
+  EncryptionMode get mode => EncryptionMode.aesGcm;
+
+  @override
+  Future<Object?> encryptRequest(Object? payload) {
+    return channel.invokeMethod<String>('encrypt', <String, Object?>{
+      'data': jsonEncode(payload),
+    });
+  }
+
+  @override
+  Future<Object?> decryptResponse(Object? payload) async {
+    final plainText = await channel.invokeMethod<String>(
+      'decrypt',
+      <String, Object?>{'data': payload},
+    );
+    return jsonDecode(plainText!);
   }
 }

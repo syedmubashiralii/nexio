@@ -37,6 +37,28 @@ global headers -> environment headers -> dynamic headers -> request headers
 
 Later values replace earlier values with the same key.
 
+## Anonymous Requests and Session Gate
+
+Sign-in, registration, public configuration, and refresh endpoints should not
+receive stale auth headers or participate in refresh classification:
+
+```dart
+final response = await Nexio.post<Session>(
+  '/auth/sign-in',
+  authMode: NexioAuthMode.anonymous,
+  data: credentials,
+  parser: Session.parse,
+);
+
+await sessionStore.save(response.data);
+Nexio.resetAuthSession();
+```
+
+When `decide` returns `expireSession`, or refresh fails, Nexio blocks future
+authenticated requests with `NexioSessionExpiredException`. Anonymous requests
+continue so the app can recover. Call `Nexio.resetAuthSession()` only after the
+app has established a valid replacement session.
+
 ## Classify Authentication Responses
 
 By default, Nexio requests a refresh for HTTP 401 only when a `refresh`
@@ -103,24 +125,23 @@ completes. `maxRefreshAttempts` limits refresh retries for one request;
 `queueWhileRefreshing` controls whether new protected requests wait for a
 refresh already in progress.
 
-## Avoid Recursive Refresh Calls
+## Keep Refresh Transport Independent
 
-If the refresh callback itself uses Nexio, ensure the refresh endpoint is not
-classified as `refreshAndRetry`. A simple guard is:
+Use an app-owned refresh client or dedicated Dio inside the refresh callback.
+This avoids recursive classification and avoids scheduling a refresh request
+behind protected requests that are already waiting for refresh.
 
 ```dart
-NexioAuthDecision decideAuth(NexioAuthSignal signal) {
-  if (signal.requestOptions.path.endsWith('/auth/refresh')) {
-    return NexioAuthDecision.proceed;
-  }
-  return signal.statusCode == 401
-      ? NexioAuthDecision.refreshAndRetry
-      : NexioAuthDecision.proceed;
-}
+refresh: (signal) => refreshClient.refresh(
+  environment: signal.environment,
+  refreshToken: sessionStore.refreshToken,
+),
 ```
 
-Alternatively, perform refresh through an app-owned Dio instance supplied only
-to the authentication service.
+If application architecture requires Nexio for refresh, mark that call
+`authMode: NexioAuthMode.anonymous`, disable deduplication, and test refresh
+under maximum request concurrency. A dedicated refresh transport remains the
+recommended production design.
 
 ## Unauthorized Events
 
@@ -144,5 +165,7 @@ Nexio never chooses a route, deletes secure storage, or assumes a token schema.
 - Exclude refresh and sign-in requests from recursive refresh classification.
 - Store refreshed tokens before returning `true`.
 - Keep session-expiry navigation single-flight.
+- Mark public/auth bootstrap requests as `NexioAuthMode.anonymous`.
+- Call `Nexio.resetAuthSession()` only after successful authentication.
 - Test simultaneous 401 responses, refresh failure, malformed responses, and
   logout while requests are in flight.

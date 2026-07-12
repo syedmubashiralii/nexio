@@ -26,6 +26,28 @@ abstract class NexioCipher {
   Future<String> decrypt(Map<String, Object?> envelope);
 }
 
+/// Adapts an encryption mode to an app-specific backend wire contract.
+///
+/// Use this when the backend or a platform-channel crypto service does not use
+/// Nexio's built-in JSON envelope. Registering an adapter replaces built-in
+/// request and response transformation for its [mode].
+abstract class NexioEncryptionAdapter {
+  /// Encryption mode handled by this adapter.
+  EncryptionMode get mode;
+
+  /// Converts a serialized app request [payload] to the backend wire format.
+  ///
+  /// Parameters:
+  /// - [payload] is the original request body before Dio sends it.
+  Future<Object?> encryptRequest(Object? payload);
+
+  /// Converts a backend [payload] to decrypted JSON, text, or bytes.
+  ///
+  /// Parameters:
+  /// - [payload] is the response body received by Dio.
+  Future<Object?> decryptResponse(Object? payload);
+}
+
 /// Encrypts request payloads and decrypts response payloads.
 class NexioEncryptionEngine {
   /// Creates an encryption engine.
@@ -43,6 +65,8 @@ class NexioEncryptionEngine {
 
   final Map<EncryptionMode, NexioCipher> _ciphers =
       <EncryptionMode, NexioCipher>{};
+  final Map<EncryptionMode, NexioEncryptionAdapter> _adapters =
+      <EncryptionMode, NexioEncryptionAdapter>{};
 
   /// Registers or replaces a cipher.
   ///
@@ -50,6 +74,14 @@ class NexioEncryptionEngine {
   /// - [cipher] handles one [EncryptionMode].
   void registerCipher(NexioCipher cipher) {
     _ciphers[cipher.mode] = cipher;
+  }
+
+  /// Registers or replaces a backend wire-format adapter.
+  ///
+  /// Parameters:
+  /// - [adapter] owns request and response transformation for one mode.
+  void registerAdapter(NexioEncryptionAdapter adapter) {
+    _adapters[adapter.mode] = adapter;
   }
 
   /// Encrypts [payload] for [mode].
@@ -60,6 +92,10 @@ class NexioEncryptionEngine {
   Future<Object?> encryptRequest(Object? payload, EncryptionMode mode) async {
     if (mode == EncryptionMode.none || payload == null) {
       return payload;
+    }
+    final adapter = _adapters[mode];
+    if (adapter != null) {
+      return adapter.encryptRequest(payload);
     }
     final cipher = _cipherFor(mode);
     final serialized = _SerializedPayload.from(payload);
@@ -78,6 +114,10 @@ class NexioEncryptionEngine {
   Future<Object?> decryptResponse(Object? payload, EncryptionMode mode) async {
     if (mode == EncryptionMode.none || payload == null) {
       return payload;
+    }
+    final adapter = _adapters[mode];
+    if (adapter != null) {
+      return adapter.decryptResponse(payload);
     }
     final envelope = _readEnvelope(payload);
     if (envelope == null) {

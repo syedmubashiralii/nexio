@@ -39,6 +39,46 @@ custom `NexioCipher` and register it:
 Nexio.registerCipher(MyEnterpriseCipher());
 ```
 
+`NexioCipher` customizes the algorithm inside Nexio's envelope. If an existing
+backend returns raw encrypted strings, uses a different envelope, or delegates
+crypto to an Android/iOS platform channel, implement `NexioEncryptionAdapter`:
+
+```dart
+class PlatformGcmAdapter implements NexioEncryptionAdapter {
+  const PlatformGcmAdapter(this.channel);
+
+  final MethodChannel channel;
+
+  @override
+  EncryptionMode get mode => EncryptionMode.aesGcm;
+
+  @override
+  Future<Object?> encryptRequest(Object? payload) async {
+    return channel.invokeMethod<String>(
+      'encrypt',
+      {'data': jsonEncode(payload)},
+    );
+  }
+
+  @override
+  Future<Object?> decryptResponse(Object? payload) async {
+    final plainText = await channel.invokeMethod<String>(
+      'decrypt',
+      {'data': payload},
+    );
+    return jsonDecode(plainText!);
+  }
+}
+
+Nexio.registerEncryptionAdapter(
+  PlatformGcmAdapter(const MethodChannel('app.crypto')),
+);
+```
+
+The adapter still runs inside Nexio's encryption interceptor, so callers only
+select `encryptionMode`. Platform-channel adapters run on the normal Flutter
+isolate; do not call them from `isolateParser`.
+
 Multipart `FormData` is not encrypted by the built-in ciphers. Encrypt files
 before upload or provide a custom cipher that matches your backend contract.
 

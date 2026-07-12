@@ -15,6 +15,13 @@
   privacy-safe aggregate network health monitoring.
 - Added backend-agnostic authentication hooks with dynamic headers,
   single-flight refresh coordination, and session-expiry callbacks.
+- Added authenticated/anonymous request modes, a protected-request session
+  gate, app-defined reachability probes, and per-request offline replay opt-in.
+- Added full-response isolate parsers for moving JSON decoding and model
+  construction off the UI isolate together.
+- Hardened in-flight deduplication by typed parser and request metadata.
+- Preserved environment, encryption, auth, content type, and Chucker metadata
+  during offline replay without persisting dynamic authorization headers.
 
 ### Architecture
 

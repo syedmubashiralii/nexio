@@ -6,6 +6,7 @@ import '../cache/cache_config.dart';
 import '../events/nexio_events.dart';
 import '../interceptors/nexio_interceptor.dart';
 import '../monitoring/nexio_health_monitor.dart';
+import '../network/network_config.dart';
 import 'encryption_config.dart';
 import 'environment.dart';
 import 'retry_policy.dart';
@@ -30,7 +31,12 @@ class NexioRuntimeOptions {
   /// - [defaultThreadMode] controls default parsing placement.
   /// - [parseThresholdKb] is the `ThreadMode.auto` threshold. Defaults to 64 KB.
   /// - [offlineQueueEnabled] stores no-connectivity failures for replay.
-  ///   Defaults to `false`.
+  ///   Individual requests must also set `queueWhenOffline`. Defaults to
+  ///   `false`.
+  /// - [offlinePersistedHeaders] is the case-insensitive allowlist of request
+  ///   headers that may be written with queued requests. Defaults to common
+  ///   non-secret headers and never persists dynamic authentication headers.
+  /// - [networkConfig] controls app-defined reachability checks.
   /// - [healthConfig] controls low-cardinality network health aggregation.
   /// - [maxConcurrentRequests] caps the scheduler. Defaults to `6`.
   /// - [defaultHeaders] are added to every request unless overridden.
@@ -56,6 +62,12 @@ class NexioRuntimeOptions {
     this.defaultThreadMode = ThreadMode.auto,
     this.parseThresholdKb = 64,
     this.offlineQueueEnabled = false,
+    this.offlinePersistedHeaders = const <String>{
+      'accept',
+      'content-type',
+      'x-idempotency-key',
+    },
+    this.networkConfig = const NexioNetworkConfig(),
     this.healthConfig = const NexioHealthConfig(),
     this.maxConcurrentRequests = 6,
     this.defaultHeaders = const {},
@@ -104,6 +116,12 @@ class NexioRuntimeOptions {
 
   /// Whether no-connectivity failures are stored and replayed later.
   final bool offlineQueueEnabled;
+
+  /// Request-header names allowed in persisted offline queue entries.
+  final Set<String> offlinePersistedHeaders;
+
+  /// Active connectivity verification configuration.
+  final NexioNetworkConfig networkConfig;
 
   /// Aggregated network health configuration.
   final NexioHealthConfig healthConfig;

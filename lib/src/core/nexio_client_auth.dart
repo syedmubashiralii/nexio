@@ -1,10 +1,11 @@
 part of 'nexio_client.dart';
 
 extension on NexioClient {
-  Future<void> _waitForAuthRefreshIfNeeded() async {
+  Future<void> _waitForAuthRefreshIfNeeded(NexioAuthMode authMode) async {
     final authConfig = options.authConfig;
     final refreshCompleter = _authRefreshCompleter;
-    if (authConfig == null ||
+    if (authMode == NexioAuthMode.anonymous ||
+        authConfig == null ||
         !authConfig.queueWhileRefreshing ||
         refreshCompleter == null) {
       return;
@@ -23,6 +24,9 @@ extension on NexioClient {
     required Object? data,
   }) async {
     final authConfig = options.authConfig;
+    if (requestOptions.authMode == NexioAuthMode.anonymous) {
+      return null;
+    }
     if (authConfig == null) {
       if (response.statusCode == 401) {
         final event =
@@ -48,6 +52,7 @@ extension on NexioClient {
     }
 
     if (decision == NexioAuthDecision.expireSession) {
+      _authSessionExpired = true;
       healthMonitor.record(url, NexioHealthOutcome.unauthorized);
       _emitUnauthorized(url, environmentName);
       authConfig.onSessionExpired?.call(signal);
@@ -58,12 +63,21 @@ extension on NexioClient {
     healthMonitor.record(url, NexioHealthOutcome.authRefresh);
     if (authRefreshAttempt >= authConfig.maxRefreshAttempts ||
         authConfig.refresh == null) {
+      _authSessionExpired = true;
       authConfig.onSessionExpired?.call(signal);
       throw NexioException('Nexio auth refresh failed or was not configured.');
     }
 
-    final refreshed = await _refreshAuth(signal, authConfig);
+    bool refreshed;
+    try {
+      refreshed = await _refreshAuth(signal, authConfig);
+    } catch (_) {
+      _authSessionExpired = true;
+      authConfig.onSessionExpired?.call(signal);
+      rethrow;
+    }
     if (!refreshed) {
+      _authSessionExpired = true;
       authConfig.onSessionExpired?.call(signal);
       throw NexioException('Nexio auth refresh returned false.');
     }

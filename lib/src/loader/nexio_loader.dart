@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 /// Presents a global or per-request loader without forcing app design.
@@ -13,6 +15,8 @@ class NexioLoaderController {
 
   int _visibleCount = 0;
   bool _dialogVisible = false;
+  NavigatorState? _presentingNavigator;
+  Object? _dialogIdentity;
 
   /// Shows the loader.
   ///
@@ -38,19 +42,33 @@ class NexioLoaderController {
     }
 
     _dialogVisible = true;
-    showDialog<void>(
-      context: targetContext,
-      barrierDismissible: dismissible,
-      barrierColor: barrierColor ?? const Color(0x99000000),
-      builder: (_) {
-        return Center(
-          child: loaderWidget ??
-              const SizedBox.square(
-                dimension: 44,
-                child: CircularProgressIndicator(strokeWidth: 3),
-              ),
-        );
-      },
+    _presentingNavigator = Navigator.of(targetContext, rootNavigator: true);
+    final dialogIdentity = Object();
+    _dialogIdentity = dialogIdentity;
+    unawaited(
+      showDialog<void>(
+        context: targetContext,
+        useRootNavigator: true,
+        barrierDismissible: dismissible,
+        barrierColor: barrierColor ?? const Color(0x99000000),
+        builder: (_) {
+          return Center(
+            child: loaderWidget ??
+                const SizedBox.square(
+                  dimension: 44,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+          );
+        },
+      ).whenComplete(() {
+        if (!identical(_dialogIdentity, dialogIdentity)) {
+          return;
+        }
+        _dialogVisible = false;
+        _presentingNavigator = null;
+        _dialogIdentity = null;
+        _visibleCount = 0;
+      }),
     );
   }
 
@@ -62,10 +80,12 @@ class NexioLoaderController {
     if (_visibleCount > 0 || !_dialogVisible) {
       return;
     }
-    final navigator = navigatorKey?.currentState;
+    final navigator = _presentingNavigator ?? navigatorKey?.currentState;
     if (navigator?.canPop() ?? false) {
       navigator?.pop();
     }
     _dialogVisible = false;
+    _presentingNavigator = null;
+    _dialogIdentity = null;
   }
 }

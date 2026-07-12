@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexio/nexio.dart';
 
@@ -92,6 +95,50 @@ void main() {
     expect(responses.map((response) => response.data['id']), [7, 7, 7]);
   });
 
+  test('does not deduplicate requests with different typed parsers', () async {
+    var hits = 0;
+    final adapter = _FakeAdapter((_) async {
+      hits += 1;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      return ResponseBody.fromString('{"id":7}', 200, headers: _jsonHeaders);
+    });
+
+    Nexio.initialize(
+      environments: _environments,
+      initialEnvironment: 'dev',
+      dio: _dio(adapter),
+    );
+
+    final responses = await Future.wait(<Future<NexioResponse<String>>>[
+      Nexio.get<String>('/profile', parser: (_) async => 'first'),
+      Nexio.get<String>('/profile', parser: (_) async => 'second'),
+    ]);
+
+    expect(hits, 2);
+    expect(responses.map((response) => response.data), ['first', 'second']);
+  });
+
+  test('runs full response parsing in a background isolate', () async {
+    final adapter = _FakeAdapter((_) {
+      return ResponseBody.fromString('{"id":7}', 200, headers: _jsonHeaders);
+    });
+
+    Nexio.initialize(
+      environments: _environments,
+      initialEnvironment: 'dev',
+      dio: _dio(adapter),
+    );
+
+    final response = await Nexio.get<Map<String, Object?>>(
+      '/large-profile',
+      threadMode: ThreadMode.background,
+      isolateParser: _isolateMapParser,
+    );
+
+    expect(response.data['id'], 7);
+    expect(response.data['isolate'], isNot(Isolate.current.hashCode));
+  });
+
   test('encrypts request payloads with AES-GCM envelopes', () async {
     Object? sentData;
     final adapter = _FakeAdapter((options) {
@@ -123,6 +170,31 @@ void main() {
     expect(envelope['nonce'], isNotNull);
     expect(envelope['mac'], isNotNull);
     expect(envelope['payload'], isNotNull);
+  });
+
+  test('supports app-specific encryption wire formats', () async {
+    Object? sentData;
+    final adapter = _FakeAdapter((options) {
+      sentData = options.data;
+      return ResponseBody.fromString('encrypted-response', 200);
+    });
+
+    Nexio.initialize(
+      environments: _environments,
+      initialEnvironment: 'dev',
+      dio: _dio(adapter),
+    );
+    Nexio.registerEncryptionAdapter(_RawEncryptionAdapter());
+
+    final response = await Nexio.post<Map<String, Object?>>(
+      '/platform-crypto',
+      data: const <String, Object?>{'amount': 10},
+      encryptionMode: EncryptionMode.aesGcm,
+      parser: _mapParser,
+    );
+
+    expect(sentData, 'encrypted:{"amount":10}');
+    expect(response.data, <String, Object?>{'decrypted': true});
   });
 
   test('serves cache-only reads from memory cache', () async {
@@ -209,6 +281,123 @@ void main() {
           'https://dev.example.com/balance',
           'https://dev.example.com/offers',
         ]));
+  });
+
+  test('separates anonymous traffic and blocks expired sessions', () async {
+    final capturedAuthorization = <String, Object?>{};
+    var hits = 0;
+    final adapter = _FakeAdapter((options) {
+      hits += 1;
+      capturedAuthorization[options.path] = options.headers['Authorization'];
+      if (options.path.endsWith('/expire')) {
+        return ResponseBody.fromString(
+          '{"code":"SESSION_EXPIRED"}',
+          401,
+          headers: _jsonHeaders,
+        );
+      }
+      return ResponseBody.fromString('{"ok":true}', 200, headers: _jsonHeaders);
+    });
+
+    Nexio.initialize(
+      environments: _environments,
+      initialEnvironment: 'dev',
+      dio: _dio(adapter),
+      authConfig: NexioAuthConfig(
+        headersProvider: () => const <String, Object?>{
+          'Authorization': 'Bearer token',
+        },
+        decide: (signal) => signal.data is Map &&
+                (signal.data! as Map<Object?, Object?>)['code'] ==
+                    'SESSION_EXPIRED'
+            ? NexioAuthDecision.expireSession
+            : NexioAuthDecision.proceed,
+      ),
+    );
+
+    await expectLater(
+      Nexio.get<Map<String, Object?>>('/expire', parser: _mapParser),
+      throwsA(isA<NexioException>()),
+    );
+    expect(Nexio.isAuthSessionExpired, isTrue);
+
+    await expectLater(
+      Nexio.get<Map<String, Object?>>('/protected', parser: _mapParser),
+      throwsA(isA<NexioSessionExpiredException>()),
+    );
+
+    final publicResponse = await Nexio.get<Map<String, Object?>>(
+      '/public-config',
+      authMode: NexioAuthMode.anonymous,
+      parser: _mapParser,
+    );
+    expect(publicResponse.data['ok'], isTrue);
+    expect(
+        capturedAuthorization['https://dev.example.com/public-config'], isNull);
+
+    Nexio.resetAuthSession();
+    await Nexio.get<Map<String, Object?>>('/protected', parser: _mapParser);
+    expect(Nexio.isAuthSessionExpired, isFalse);
+    expect(
+      capturedAuthorization['https://dev.example.com/protected'],
+      'Bearer token',
+    );
+    expect(hits, 3);
+  });
+
+  test('active connectivity probe can stop a request before Dio', () async {
+    var hits = 0;
+    var probes = 0;
+    final adapter = _FakeAdapter((_) {
+      hits += 1;
+      return ResponseBody.fromString('{"ok":true}', 200, headers: _jsonHeaders);
+    });
+
+    Nexio.initialize(
+      environments: _environments,
+      initialEnvironment: 'dev',
+      dio: _dio(adapter),
+      networkConfig: NexioNetworkConfig(
+        connectivityProbe: () {
+          probes += 1;
+          return false;
+        },
+        verifyBeforeRequest: true,
+      ),
+    );
+
+    await expectLater(
+      Nexio.get<Map<String, Object?>>('/status', parser: _mapParser),
+      throwsA(isA<NexioOfflineException>()),
+    );
+    expect(probes, greaterThan(0));
+    expect(hits, 0);
+  });
+
+  testWidgets('context loader dismisses without a global navigator key',
+      (tester) async {
+    late BuildContext pageContext;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            pageContext = context;
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+
+    final controller = NexioLoaderController();
+    controller.show(context: pageContext);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    controller.hide();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
   test('uses cache key extra to isolate versioned enterprise caches', () async {
@@ -393,6 +582,13 @@ Future<Map<String, Object?>> _mapParser(Object? input) async {
   return Map<String, Object?>.from(input! as Map);
 }
 
+Map<String, Object?> _isolateMapParser(String source) {
+  return <String, Object?>{
+    ...Map<String, Object?>.from(jsonDecode(source) as Map),
+    'isolate': Isolate.current.hashCode,
+  };
+}
+
 class _User {
   const _User({required this.id, required this.name});
 
@@ -443,5 +639,21 @@ class _CaptureMetadataInterceptor extends Interceptor {
       options.extra[NexioRequestMetadata.environmentName] as String?,
     );
     handler.next(options);
+  }
+}
+
+class _RawEncryptionAdapter implements NexioEncryptionAdapter {
+  @override
+  EncryptionMode get mode => EncryptionMode.aesGcm;
+
+  @override
+  Future<Object?> encryptRequest(Object? payload) async {
+    return 'encrypted:${jsonEncode(payload)}';
+  }
+
+  @override
+  Future<Object?> decryptResponse(Object? payload) async {
+    expect(payload, 'encrypted-response');
+    return <String, Object?>{'decrypted': true};
   }
 }

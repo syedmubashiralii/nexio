@@ -37,9 +37,13 @@ class NexioContextInterceptor extends Interceptor {
       final requestHeaders = Map<String, Object?>.from(options.headers);
       final environmentName =
           options.extra[NexioRequestMetadata.environmentName] as String?;
-      final dynamicHeaders = dynamicHeadersProvider == null
-          ? const <String, Object?>{}
-          : await Future.value(dynamicHeadersProvider!());
+      final authMode =
+          options.extra[NexioRequestMetadata.authMode] as NexioAuthMode? ??
+              NexioAuthMode.authenticated;
+      final dynamicHeaders =
+          dynamicHeadersProvider == null || authMode == NexioAuthMode.anonymous
+              ? const <String, Object?>{}
+              : await Future.value(dynamicHeadersProvider!());
       options.headers
         ..clear()
         ..addAll(defaultHeaders)

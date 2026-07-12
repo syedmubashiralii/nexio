@@ -23,6 +23,8 @@ void main() {
       'doc/authentication.md',
       'doc/security.md',
       'doc/errors.md',
+      'doc/offline-queue.md',
+      'doc/fintech-telecom.md',
       'doc/testing.md',
       'doc/troubleshooting.md',
       'doc/production-checklist.md',

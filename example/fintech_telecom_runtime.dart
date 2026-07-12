@@ -1,5 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:nexio/nexio.dart';
+
+/// App-owned token refresh operation, usually implemented with a dedicated Dio.
+typedef RefreshSession = Future<SessionTokens?> Function(
+  NexioAuthSignal signal,
+);
 
 /// Enterprise-style setup for fintech, telecom, wallet, and self-care apps.
 class FintechTelecomRuntime {
@@ -7,11 +14,15 @@ class FintechTelecomRuntime {
     required this.sessionStore,
     required this.deviceContext,
     required this.remoteConfig,
+    required this.refreshSession,
+    required this.connectivityProbe,
   });
 
   final SessionStore sessionStore;
   final DeviceContext deviceContext;
   final RemoteConfigStore remoteConfig;
+  final RefreshSession refreshSession;
+  final NexioConnectivityProbe connectivityProbe;
 
   /// Initialize once from `main.dart`.
   void initialize() {
@@ -31,6 +42,9 @@ class FintechTelecomRuntime {
       defaultThreadMode: ThreadMode.auto,
       parseThresholdKb: 64,
       maxConcurrentRequests: 6,
+      networkConfig: NexioNetworkConfig(
+        connectivityProbe: connectivityProbe,
+      ),
       retryPolicy: const RetryPolicy(
         retries: 2,
         strategy: RetryStrategy.exponential,
@@ -91,31 +105,15 @@ class FintechTelecomRuntime {
   }
 
   Future<bool> _refreshTokens(NexioAuthSignal signal) async {
-    final response = await Nexio.post<Map<String, Object?>>(
-      '/auth/refresh',
-      data: <String, Object?>{
-        'accessToken': sessionStore.accessToken,
-        'refreshToken': sessionStore.refreshToken,
-        ...deviceContext.commonBody(),
-      },
-      deduplicate: false,
-      logInChucker: false,
-      parser: parseMap,
-    );
-
-    final data = response.data;
-    final accessToken = data['accessToken']?.toString();
-    final refreshToken = data['refreshToken']?.toString();
-    final gatewayToken = data['gatewayToken']?.toString();
-
-    if (accessToken == null || refreshToken == null) {
+    final tokens = await refreshSession(signal);
+    if (tokens == null) {
       return false;
     }
 
     sessionStore.saveTokens(
-      accessToken: accessToken,
-      refreshToken: refreshToken,
-      gatewayToken: gatewayToken ?? sessionStore.gatewayToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      gatewayToken: tokens.gatewayToken,
     );
     return true;
   }
@@ -145,6 +143,7 @@ class FintechTelecomRuntime {
       cacheKeyExtra: _cacheNamespace('dashboardOffers'),
       threadMode: ThreadMode.auto,
       parseThresholdKb: 32,
+      isolateParser: Offer.parseListInIsolate,
       priority: RequestPriority.normal,
       logInChucker: true,
     );
@@ -229,6 +228,18 @@ class FintechTelecomRuntime {
   }
 }
 
+class SessionTokens {
+  const SessionTokens({
+    required this.accessToken,
+    required this.refreshToken,
+    required this.gatewayToken,
+  });
+
+  final String accessToken;
+  final String refreshToken;
+  final String gatewayToken;
+}
+
 Future<Map<String, Object?>> parseMap(Object? input) async {
   return Map<String, Object?>.from(input! as Map);
 }
@@ -310,6 +321,17 @@ class Offer {
   static Future<List<Offer>> parseList(Object? input) async {
     final items = input! as List<Object?>;
     return items.map((item) {
+      final json = Map<String, Object?>.from(item! as Map);
+      return Offer(
+        id: json['id']!.toString(),
+        title: json['title']!.toString(),
+      );
+    }).toList();
+  }
+
+  static List<Offer> parseListInIsolate(String source) {
+    final decoded = jsonDecode(source) as List<Object?>;
+    return decoded.map((item) {
       final json = Map<String, Object?>.from(item! as Map);
       return Offer(
         id: json['id']!.toString(),

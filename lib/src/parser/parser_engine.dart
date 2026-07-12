@@ -29,14 +29,25 @@ class NexioParserEngine {
   /// Parameters:
   /// - [input] is the decrypted response body.
   /// - [parser] is a per-request parser override.
+  /// - [isolateParser] decodes and constructs models in one isolate callback.
   /// - [threadMode] controls built-in parsing placement.
   /// - [thresholdKb] controls automatic background parsing.
   Future<T> parse<T>(
     Object? input, {
     NexioParser<T>? parser,
+    NexioIsolateParser<T>? isolateParser,
     required ThreadMode threadMode,
     required int thresholdKb,
   }) async {
+    if (isolateParser != null) {
+      final source = input is String ? input : jsonEncode(input);
+      return threadEngine.parseSerialized<T>(
+        source,
+        isolateParser,
+        threadMode: threadMode,
+        thresholdKb: thresholdKb,
+      );
+    }
     final decoded = await _decodeIfJson(
       input,
       threadMode: threadMode,

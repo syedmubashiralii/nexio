@@ -12,6 +12,9 @@ offline, and encryption failures distinguishable.
 | `NexioCacheMissException` | `cacheOnly` found no valid entry | Show unavailable state or choose another policy |
 | `NexioHttpException<T>` | Server returned a non-success status | Inspect the typed `response` and apply domain rules |
 | `NexioOfflineQueuedException` | Request was persisted for later replay | Treat it as queued, not completed |
+| `NexioOfflineException` | Active connectivity verification found no reachable network | Show offline state or retry later |
+| `NexioOfflineQueueSerializationException` | Replay data is not JSON-safe | Remove unsupported values or disable replay |
+| `NexioSessionExpiredException` | Protected traffic is blocked after auth expiry | Establish a new session, then reset the auth gate |
 | `NexioEncryptionException` | Cipher configuration or encrypted envelope is invalid | Stop the request and verify backend/key contract |
 | `DioException` | Transport, timeout, cancellation, or adapter failure | Inspect `type`, retry policy, and connectivity |
 | Parser error | Decoded data does not match `T` or the parser throws | Fix the response/parser contract |
@@ -42,7 +45,11 @@ the body with a parser that understands both forms.
 
 ```dart
 try {
-  await Nexio.post<void>('/events', data: event);
+  await Nexio.post<void>(
+    '/events',
+    data: event,
+    queueWhenOffline: true,
+  );
 } on NexioOfflineQueuedException catch (error) {
   showQueuedState(error.queueId);
 }

@@ -4,6 +4,13 @@
 /// possible. Parsers may return synchronously or asynchronously.
 typedef NexioParser<T> = Future<T> Function(Object? input);
 
+/// Parses a serialized response entirely inside a background isolate.
+///
+/// The callback must be a top-level or static function and must return an
+/// isolate-sendable value. Decode JSON and construct models inside the callback
+/// so both CPU-heavy steps stay off the UI isolate.
+typedef NexioIsolateParser<T> = T Function(String source);
+
 /// Registry for app-level typed response parsers.
 class NexioParserRegistry {
   final Map<Type, NexioParser<Object?>> _parsers =

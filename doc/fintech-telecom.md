@@ -16,6 +16,25 @@ bottlenecks:
 
 Nexio solves these as a runtime, not as another generated API class.
 
+## What Moves Into Nexio
+
+| Existing app responsibility | Nexio replacement | Remains app-owned |
+|---|---|---|
+| Repeated Dio setup and request callbacks | One request pipeline and typed `NexioResponse<T>` | Endpoint services and domain models |
+| Global base URL constants | Named `NexioEnvironment` values and runtime switching | Environment selection policy |
+| Header maps copied into every API | `headersProvider`, environment headers, request headers | Secure token and device-context storage |
+| Platform or utility crypto calls around each request | Encryption interceptor and `NexioCipher` adapters | Backend envelope/key provisioning |
+| Long-lived network isolate and send ports | Async Dio I/O plus threshold-based CPU isolates | Profiling and parser selection |
+| Global connectivity booleans and preflight checks | Network streams, active probe, and `checkConnectivity()` | Health endpoint and offline UI copy |
+| Loader show/dismiss in every callback | Reference-counted optional request loader | Screen loaders that begin before API work |
+| Duplicate read calls | Typed in-flight deduplication | Transaction button single-flight guard |
+| Token-refresh queues | App-owned refresh callback coordinated once | Refresh endpoint and token persistence |
+
+Deep links, navigation, preferences, user profile state, theme state, and
+feature-specific response messages do not belong in a networking package. Keep
+them in the application and connect them through callbacks, events, and dynamic
+headers.
+
 ## Dynamic Enterprise Headers
 
 Use `authConfig.headersProvider` for data that can change at runtime:
@@ -71,7 +90,9 @@ authConfig: NexioAuthConfig(
 ```
 
 Only one refresh callback runs at a time. Other protected requests wait and then
-retry with fresh headers.
+retry with fresh headers. Use an app-owned refresh client inside the callback.
+Public/auth bootstrap calls should use `NexioAuthMode.anonymous`. After a new
+session is stored, call `Nexio.resetAuthSession()`.
 
 ## Versioned Cache for Remote Config APIs
 
@@ -121,11 +142,29 @@ await Nexio.get<List<Offer>>(
   '/large-catalog',
   threadMode: ThreadMode.auto,
   parseThresholdKb: 32,
+  isolateParser: Offer.parseListInIsolate,
 );
 ```
 
 Small payloads parse on the main isolate. Large built-in JSON decoding moves to
-a background isolate.
+a background isolate. An explicit top-level or static `isolateParser` moves
+model construction there as well. The Dio network wait remains normal async I/O
+and callers still use `await`.
+
+## Connectivity and Offline Work
+
+Use a custom reachability probe when interface connectivity is not enough:
+
+```dart
+networkConfig: NexioNetworkConfig(
+  connectivityProbe: backendHealthProbe,
+),
+```
+
+Enable offline queueing only for operations whose delayed execution is valid,
+then opt in per request with `queueWhenOffline: true`. Do not queue payments,
+OTP verification, bundle purchases, or account changes by default. See the
+[offline queue guide](offline-queue.md).
 
 ## Transaction Safety
 

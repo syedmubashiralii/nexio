@@ -3,9 +3,12 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:synchronized/synchronized.dart';
 import 'package:uuid/uuid.dart';
 
+import '../config/environment.dart';
 import '../events/nexio_events.dart';
+import '../errors/nexio_exception.dart';
 import '../models/nexio_metrics.dart';
 import '../models/nexio_response.dart';
 
@@ -20,6 +23,11 @@ class NexioQueuedRequest {
   /// - [data] is a JSON-safe request body.
   /// - [queryParameters] are request query parameters.
   /// - [headers] are request headers.
+  /// - [environmentName] is the environment captured when queued.
+  /// - [encryptionMode] preserves request encryption during replay.
+  /// - [authMode] preserves authenticated or anonymous behavior during replay.
+  /// - [contentType] preserves the request content type during replay.
+  /// - [logInChucker] preserves the request capture decision during replay.
   /// - [createdAt] records when the request was queued.
   const NexioQueuedRequest({
     required this.id,
@@ -29,6 +37,11 @@ class NexioQueuedRequest {
     required this.queryParameters,
     required this.headers,
     required this.createdAt,
+    required this.environmentName,
+    required this.encryptionMode,
+    required this.authMode,
+    required this.contentType,
+    required this.logInChucker,
   });
 
   /// Unique queue identifier.
@@ -52,6 +65,21 @@ class NexioQueuedRequest {
   /// Queue creation time.
   final DateTime createdAt;
 
+  /// Environment captured when this request was queued.
+  final String? environmentName;
+
+  /// Encryption mode used when this request is replayed.
+  final EncryptionMode encryptionMode;
+
+  /// Authentication behavior used when this request is replayed.
+  final NexioAuthMode authMode;
+
+  /// Request content type used during replay.
+  final String? contentType;
+
+  /// Whether Chucker captures the replayed request.
+  final bool logInChucker;
+
   /// Converts this request to JSON.
   Map<String, Object?> toJson() {
     return <String, Object?>{
@@ -62,6 +90,11 @@ class NexioQueuedRequest {
       'queryParameters': queryParameters,
       'headers': headers,
       'createdAt': createdAt.toIso8601String(),
+      'environmentName': environmentName,
+      'encryptionMode': encryptionMode.name,
+      'authMode': authMode.name,
+      'contentType': contentType,
+      'logInChucker': logInChucker,
     };
   }
 
@@ -78,6 +111,11 @@ class NexioQueuedRequest {
       queryParameters: _mapOf(json['queryParameters']),
       headers: _mapOf(json['headers']),
       createdAt: DateTime.parse(json['createdAt'].toString()),
+      environmentName: json['environmentName']?.toString(),
+      encryptionMode: _encryptionModeOf(json['encryptionMode']),
+      authMode: _authModeOf(json['authMode']),
+      contentType: json['contentType']?.toString(),
+      logInChucker: json['logInChucker'] == true,
     );
   }
 
@@ -89,7 +127,26 @@ class NexioQueuedRequest {
       for (final entry in value.entries) entry.key.toString(): entry.value,
     };
   }
+
+  static EncryptionMode _encryptionModeOf(Object? value) {
+    return EncryptionMode.values.firstWhere(
+      (mode) => mode.name == value?.toString(),
+      orElse: () => EncryptionMode.none,
+    );
+  }
+
+  static NexioAuthMode _authModeOf(Object? value) {
+    return NexioAuthMode.values.firstWhere(
+      (mode) => mode.name == value?.toString(),
+      orElse: () => NexioAuthMode.authenticated,
+    );
+  }
 }
+
+/// Executes one queued request through Nexio's configured Dio pipeline.
+typedef NexioQueuedRequestExecutor = Future<Response<Object?>> Function(
+  NexioQueuedRequest request,
+);
 
 /// Stores no-connectivity failures and replays them later.
 class NexioOfflineQueue {
@@ -110,6 +167,7 @@ class NexioOfflineQueue {
   final String folderName;
 
   final Uuid _uuid = const Uuid();
+  final Lock _lock = Lock();
   File? _file;
 
   /// Adds a request to the queue and returns its id.
@@ -120,26 +178,43 @@ class NexioOfflineQueue {
   /// - [data] is the request body.
   /// - [queryParameters] are request query parameters.
   /// - [headers] are request headers.
+  /// - [environmentName] is the environment captured for replay.
+  /// - [encryptionMode] preserves request encryption during replay.
+  /// - [authMode] preserves auth header and session behavior during replay.
+  /// - [contentType] preserves request encoding during replay.
+  /// - [logInChucker] controls replay capture.
   Future<String> enqueue({
     required String method,
     required String url,
     Object? data,
     Map<String, Object?>? queryParameters,
     Map<String, Object?>? headers,
+    required String environmentName,
+    required EncryptionMode encryptionMode,
+    required NexioAuthMode authMode,
+    String? contentType,
+    required bool logInChucker,
   }) async {
-    final request = NexioQueuedRequest(
-      id: _uuid.v4(),
-      method: method,
-      url: url,
-      data: _jsonSafe(data),
-      queryParameters: queryParameters ?? const <String, Object?>{},
-      headers: headers ?? const <String, Object?>{},
-      createdAt: DateTime.now(),
-    );
-    final items = await load();
-    items.add(request);
-    await _write(items);
-    return request.id;
+    return _lock.synchronized(() async {
+      final request = NexioQueuedRequest(
+        id: _uuid.v4(),
+        method: method,
+        url: url,
+        data: _jsonSafe(data),
+        queryParameters: _jsonSafeMap(queryParameters),
+        headers: _jsonSafeMap(headers),
+        createdAt: DateTime.now(),
+        environmentName: environmentName,
+        encryptionMode: encryptionMode,
+        authMode: authMode,
+        contentType: contentType,
+        logInChucker: logInChucker,
+      );
+      final items = await load();
+      items.add(request);
+      await _write(items);
+      return request.id;
+    });
   }
 
   /// Loads queued requests from disk.
@@ -165,43 +240,40 @@ class NexioOfflineQueue {
     }
   }
 
-  /// Replays queued requests with [dio].
+  /// Replays queued requests with [execute].
   ///
   /// Parameters:
-  /// - [dio] is Nexio's configured Dio instance.
-  Future<void> replay(Dio dio) async {
-    final items = await load();
-    if (items.isEmpty) {
-      return;
-    }
-    final remaining = <NexioQueuedRequest>[];
-    for (final item in items) {
-      try {
-        final response = await dio.request<Object?>(
-          item.url,
-          data: item.data,
-          queryParameters: item.queryParameters,
-          options: Options(method: item.method, headers: item.headers),
-        );
-        eventBus.emit(
-          NexioRequestSuccessEvent<Object?>(
-            NexioResponse<Object?>(
-              data: response.data,
-              statusCode: response.statusCode,
-              statusMessage: response.statusMessage,
-              headers: response.headers.map,
-              metrics: NexioMetrics.zero,
-              fromCache: false,
-              requestOptions: response.requestOptions,
-            ),
-          ),
-        );
-      } catch (error, stackTrace) {
-        remaining.add(item);
-        eventBus.emit(NexioRequestFailedEvent(error, stackTrace));
+  /// - [execute] restores the original runtime metadata and sends one request.
+  Future<void> replay(NexioQueuedRequestExecutor execute) async {
+    await _lock.synchronized(() async {
+      final items = await load();
+      if (items.isEmpty) {
+        return;
       }
-    }
-    await _write(remaining);
+      final remaining = <NexioQueuedRequest>[];
+      for (final item in items) {
+        try {
+          final response = await execute(item);
+          eventBus.emit(
+            NexioRequestSuccessEvent<Object?>(
+              NexioResponse<Object?>(
+                data: response.data,
+                statusCode: response.statusCode,
+                statusMessage: response.statusMessage,
+                headers: response.headers.map,
+                metrics: NexioMetrics.zero,
+                fromCache: false,
+                requestOptions: response.requestOptions,
+              ),
+            ),
+          );
+        } catch (error, stackTrace) {
+          remaining.add(item);
+          eventBus.emit(NexioRequestFailedEvent(error, stackTrace));
+        }
+      }
+      await _write(remaining);
+    });
   }
 
   Future<void> _write(List<NexioQueuedRequest> items) async {
@@ -228,10 +300,17 @@ class NexioOfflineQueue {
 
   Object? _jsonSafe(Object? data) {
     try {
-      jsonEncode(data);
-      return data;
-    } on JsonUnsupportedObjectError {
-      return data.toString();
+      return jsonDecode(jsonEncode(data));
+    } catch (error) {
+      throw NexioOfflineQueueSerializationException(cause: error);
     }
+  }
+
+  Map<String, Object?> _jsonSafeMap(Map<String, Object?>? value) {
+    if (value == null) {
+      return <String, Object?>{};
+    }
+    final safe = _jsonSafe(value);
+    return Map<String, Object?>.from(safe! as Map);
   }
 }

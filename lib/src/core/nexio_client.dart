@@ -61,7 +61,10 @@ class NexioClient {
     loaderController =
         NexioLoaderController(navigatorKey: options.navigatorKey);
     cancellationRegistry = NexioCancellationRegistry(eventBus);
-    networkMonitor = NexioNetworkMonitor(eventBus: eventBus);
+    networkMonitor = NexioNetworkMonitor(
+      eventBus: eventBus,
+      config: options.networkConfig,
+    );
     parserEngine = NexioParserEngine(
       registry: parserRegistry,
       threadEngine: NexioThreadEngine(),
@@ -117,6 +120,8 @@ class NexioClient {
   final Map<String, Dio> _dioPool = <String, Dio>{};
   final Set<Dio> _configuredDio = Set<Dio>.identity();
   Completer<bool>? _authRefreshCompleter;
+  bool _authSessionExpired = false;
+  int _authGeneration = 0;
   late String _environment;
 
   /// Active environment.
@@ -125,6 +130,18 @@ class NexioClient {
   /// Configuration for the active environment.
   NexioEnvironment get currentEnvironmentConfig =>
       _environmentConfig(_environment);
+
+  /// Whether authenticated requests are blocked after session expiry.
+  bool get isAuthSessionExpired => _authSessionExpired;
+
+  /// Opens the authenticated request gate after the app establishes a session.
+  void resetAuthSession() {
+    _authSessionExpired = false;
+    _authGeneration += 1;
+    if (options.offlineQueueEnabled && networkMonitor.isOnline) {
+      unawaited(offlineQueue.replay(_replayQueuedRequest));
+    }
+  }
 
   /// Switches the active environment without reinitializing Dio.
   ///
@@ -180,6 +197,14 @@ class NexioClient {
     encryptionEngine.registerCipher(cipher);
   }
 
+  /// Registers an app-specific encryption wire-format [adapter].
+  ///
+  /// Parameters:
+  /// - [adapter] replaces built-in transformation for its encryption mode.
+  void registerEncryptionAdapter(NexioEncryptionAdapter adapter) {
+    encryptionEngine.registerAdapter(adapter);
+  }
+
   /// Runs a typed request.
   ///
   /// Parameters:
@@ -187,6 +212,10 @@ class NexioClient {
   Future<NexioResponse<T>> request<T>(
     NexioRequestOptions<T> requestOptions,
   ) async {
+    if (requestOptions.authMode == NexioAuthMode.authenticated &&
+        _authSessionExpired) {
+      throw const NexioSessionExpiredException();
+    }
     final environmentName = _environment;
     final url = _resolveUrlFor(
       requestOptions.path,
@@ -201,8 +230,14 @@ class NexioClient {
       extra: requestOptions.cacheKeyExtra,
     );
 
+    final deduplicationKey = _deduplicationKey<T>(
+      cacheKey,
+      requestOptions,
+      environmentName,
+    );
+
     if (requestOptions.deduplicate) {
-      final existing = _inFlight[cacheKey];
+      final existing = _inFlight[deduplicationKey];
       if (existing != null) {
         return existing.then((response) => response as NexioResponse<T>);
       }
@@ -219,16 +254,49 @@ class NexioClient {
     );
 
     if (requestOptions.deduplicate) {
-      _inFlight[cacheKey] = future;
+      _inFlight[deduplicationKey] = future;
     }
 
     try {
       return await future;
     } finally {
       if (requestOptions.deduplicate) {
-        _inFlight.remove(cacheKey);
+        _inFlight.remove(deduplicationKey);
       }
     }
+  }
+
+  String _deduplicationKey<T>(
+    String cacheKey,
+    NexioRequestOptions<T> requestOptions,
+    String environmentName,
+  ) {
+    final dioOptions = requestOptions.dioOptions;
+    return NexioCacheStore.buildKey(
+      method: 'NEXIO_DEDUPLICATION',
+      url: cacheKey,
+      extra: <String, Object?>{
+        'environment': environmentName,
+        'type': T.toString(),
+        'parser': requestOptions.parser == null
+            ? null
+            : identityHashCode(requestOptions.parser),
+        'isolateParser': requestOptions.isolateParser == null
+            ? null
+            : identityHashCode(requestOptions.isolateParser),
+        'headers': <String, Object?>{
+          ...?requestOptions.headers,
+          ...?dioOptions?.headers,
+        },
+        'contentType': requestOptions.contentType ?? dioOptions?.contentType,
+        'responseType': dioOptions?.responseType?.name,
+        'encryptionMode':
+            (requestOptions.encryptionMode ?? options.defaultEncryptionMode)
+                .name,
+        'authMode': requestOptions.authMode.name,
+        'authGeneration': _authGeneration,
+      },
+    );
   }
 
   /// Creates an upload request with multipart files.
@@ -272,6 +340,7 @@ class NexioClient {
   /// - [onProgress] receives download progress.
   /// - [autoStart] starts the task immediately. Defaults to `true`.
   /// - [logInChucker] overrides Chucker capture for this download.
+  /// - [authMode] controls dynamic auth headers for this download.
   NexioDownloadTask download(
     String path, {
     required String destinationPath,
@@ -281,7 +350,11 @@ class NexioClient {
     ProgressCallback? onProgress,
     bool autoStart = true,
     bool? logInChucker,
+    NexioAuthMode authMode = NexioAuthMode.authenticated,
   }) {
+    if (authMode == NexioAuthMode.authenticated && _authSessionExpired) {
+      throw const NexioSessionExpiredException();
+    }
     final url = resolveUrl(path, baseUrlOverride: baseUrlOverride);
     return NexioDownloadTask(
       dio: dio,
@@ -295,6 +368,7 @@ class NexioClient {
           NexioRequestMetadata.logInChucker:
               logInChucker ?? options.defaultLogInChucker,
           NexioRequestMetadata.encryptionMode: EncryptionMode.none,
+          NexioRequestMetadata.authMode: authMode,
         },
       ),
       onProgress: onProgress,

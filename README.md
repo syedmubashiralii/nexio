@@ -39,7 +39,7 @@ your backend.
 | Transport | Dio-powered GET, POST, PUT, PATCH, DELETE, multipart upload, and file download |
 | Environments | Any number of named environments, runtime switching, per-request base URL override, stable Dio pool per environment |
 | Interceptors | Built-in context, encryption, logging, and conditional Chucker interceptors plus app-owned factories |
-| Encryption | AES-CBC, AES-GCM, no encryption, and pluggable custom ciphers |
+| Encryption | AES-CBC, AES-GCM, no encryption, custom ciphers, and backend wire-format adapters |
 | Parsing | JSON, string, bytes, XML, custom parsers, registered typed models, automatic background JSON decoding |
 | Resilience | Fixed/exponential retries, cancellation, priorities, concurrency limits, in-flight deduplication |
 | Caching | Memory and disk cache, TTL, network-only, cache-only, cache-first, and network-first policies |
@@ -151,6 +151,9 @@ Nexio.initialize(
   ),
   maxConcurrentRequests: 6,
   offlineQueueEnabled: true,
+  networkConfig: NexioNetworkConfig(
+    connectivityProbe: checkBackendReachability,
+  ),
   interceptorFactories: [
     () => CorrelationIdInterceptor(),
   ],
@@ -226,15 +229,16 @@ the event loop continues rendering frames and processing input.
 
 Isolates solve a different problem: CPU work. Nexio's `ThreadMode.auto` measures
 raw JSON size and uses Flutter's `compute` for decoding when the configured
-threshold is crossed. `ThreadMode.background` always moves JSON decoding;
-`ThreadMode.main` keeps it on the current isolate.
+threshold is crossed. For very large typed responses, `isolateParser` moves
+JSON decoding and model construction together. Its callback must be top-level
+or static so Dart can send it to an isolate.
 
 ```dart
 final catalog = await Nexio.get<List<Item>>(
   '/large-catalog',
   threadMode: ThreadMode.auto,
   parseThresholdKb: 32,
-  parser: Item.parseList,
+  isolateParser: Item.parseListFromSource,
 );
 ```
 
@@ -294,6 +298,19 @@ authConfig: NexioAuthConfig(
 
 Your callback owns credentials, storage, endpoint selection, and token parsing.
 See [authentication hooks](doc/authentication.md).
+
+Mark sign-in, registration, public configuration, and refresh traffic as
+anonymous so dynamic auth headers and the expired-session gate are skipped:
+
+```dart
+final config = await Nexio.get<Map<String, Object?>>(
+  '/public/config',
+  authMode: NexioAuthMode.anonymous,
+  parser: parseMap,
+);
+
+Nexio.resetAuthSession(); // Call only after a new session is established.
+```
 
 ## Retries, Cache, Priority, and Deduplication
 
@@ -406,6 +423,26 @@ final eventSubscription = Nexio.events.listen((event) {
 final onlineSubscription = Nexio.online.listen((_) => retryVisibleWork());
 ```
 
+`connectivity_plus` reports network interfaces, not guaranteed internet access.
+Supply `NexioNetworkConfig.connectivityProbe` for a lightweight backend health
+check, call `Nexio.checkConnectivity()` on demand, or enable
+`verifyBeforeRequest` when every request must be actively checked.
+
+Offline replay is intentionally opt-in twice: enable the runtime capability,
+then mark only replay-safe requests:
+
+```dart
+await Nexio.post<void>(
+  '/analytics/events',
+  data: event,
+  queueWhenOffline: true,
+);
+```
+
+Queued requests preserve environment, encryption, authentication mode, content
+type, and Chucker policy. Authorization headers are regenerated at replay and
+are not persisted by default.
+
 ```dart
 final snapshot = Nexio.healthSnapshot;
 print('Observed outcomes: ${snapshot.total}');
@@ -440,8 +477,8 @@ See the [error guide](doc/errors.md) for the full exception model.
 - Use idempotency keys and deliberate retry policies for transactions.
 - Namespace cache keys by API version, tenant, locale, country, and account when
   those values change response meaning.
-- Decide whether offline replay is valid for each backend operation before
-  enabling it globally.
+- Enable offline replay only when needed, then opt in each replay-safe endpoint
+  with `queueWhenOffline: true`.
 - Run backend-specific integration tests on Android and iOS.
 
 Review the [production checklist](doc/production-checklist.md) before shipping.
@@ -468,6 +505,7 @@ Review the [production checklist](doc/production-checklist.md) before shipping.
 - [Uploads](doc/uploads.md)
 - [Downloads](doc/downloads.md)
 - [Events](doc/events.md)
+- [Connectivity and offline queue](doc/offline-queue.md)
 - [Health monitoring](doc/health-monitoring.md)
 - [Errors](doc/errors.md)
 - [Testing](doc/testing.md)

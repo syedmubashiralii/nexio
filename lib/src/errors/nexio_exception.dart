@@ -74,6 +74,36 @@ class NexioOfflineQueuedException extends NexioException {
   final String queueId;
 }
 
+/// Thrown when an active connectivity check reports no reachable network.
+class NexioOfflineException extends NexioException {
+  /// Creates an offline exception.
+  const NexioOfflineException()
+      : super('No reachable network is available for this request.');
+}
+
+/// Thrown when a request cannot be safely serialized for offline replay.
+class NexioOfflineQueueSerializationException extends NexioException {
+  /// Creates an offline queue serialization exception.
+  ///
+  /// Parameters:
+  /// - [cause] is the original JSON serialization error.
+  const NexioOfflineQueueSerializationException({super.cause})
+      : super(
+          'Offline replay supports JSON-safe request data, query parameters, '
+          'and persisted headers only.',
+        );
+}
+
+/// Thrown when protected traffic is blocked after session expiry.
+class NexioSessionExpiredException extends NexioException {
+  /// Creates a session-expired exception.
+  const NexioSessionExpiredException()
+      : super(
+          'The Nexio authentication session is expired. Call '
+          'Nexio.resetAuthSession() after the app establishes a new session.',
+        );
+}
+
 /// Thrown when encryption configuration is missing or invalid.
 class NexioEncryptionException extends NexioException {
   /// Creates an encryption exception.

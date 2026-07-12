@@ -14,6 +14,9 @@ abstract final class NexioRequestMetadata {
   /// Named environment captured when the request was created.
   static const String environmentName = 'nexio.environmentName';
 
+  /// Whether authentication coordination applies to this request.
+  static const String authMode = 'nexio.authMode';
+
   /// Response decryption duration in microseconds.
   static const String decryptDurationMicros = 'nexio.decryptDurationMicros';
 }
