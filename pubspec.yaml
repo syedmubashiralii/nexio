@@ -1,6 +1,6 @@
 name: nexio
 description: A production-grade Flutter networking runtime for Dio with environments, encryption, isolate parsing, retries, caching, offline queues, transfers, and observability.
-version: 0.1.0
+version: 0.2.0
 homepage: https://syedmubashirali.com
 repository: https://github.com/syedmubashiralii/nexio
 issue_tracker: https://github.com/syedmubashiralii/nexio/issues

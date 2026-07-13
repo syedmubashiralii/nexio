@@ -4,7 +4,7 @@ Add Nexio and fetch dependencies:
 
 ```yaml
 dependencies:
-  nexio: ^0.1.0
+  nexio: ^0.2.0
 ```
 
 ```bash

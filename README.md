@@ -67,7 +67,7 @@ Nexio call
 
 ```yaml
 dependencies:
-  nexio: ^0.1.0
+  nexio: ^0.2.0
 ```
 
 ```bash
@@ -517,12 +517,12 @@ Review the [production checklist](doc/production-checklist.md) before shipping.
 
 ## Supported Platforms
 
-Nexio `0.1.0` supports Flutter applications on Android and iOS. Web and desktop
+Nexio `0.2.0` supports Flutter applications on Android and iOS. Web and desktop
 platforms are not part of the V1 compatibility contract.
 
 ## Release Status
 
-`0.1.0` is the first public release. The API is documented and tested, but
+`0.2.0` is a pre-1.0 release. The API is documented and tested, but
 applications must still validate their backend contracts, encryption envelopes,
 authentication decisions, retry safety, cache policy, and offline behavior.
 

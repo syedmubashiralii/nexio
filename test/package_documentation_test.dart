@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-const _releaseVersion = '0.1.0';
+const _releaseVersion = '0.2.0';
 
 void main() {
   test('release version is consistent across public package files', () {

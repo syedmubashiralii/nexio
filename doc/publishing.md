@@ -1,6 +1,6 @@
 # Publishing Nexio to pub.dev
 
-This guide prepares and publishes Nexio `0.1.0`. Published versions are
+This guide prepares and publishes Nexio `0.2.0`. Published versions are
 immutable, so complete every preflight step before confirming the upload.
 
 The authoritative references are Dart's
@@ -31,7 +31,7 @@ release state before uploading it to pub.dev:
 
 ```bash
 git add .
-git commit -m "release: prepare nexio 0.1.0"
+git commit -m "release: prepare nexio 0.2.0"
 git push origin main
 ```
 
@@ -40,9 +40,9 @@ git push origin main
 Confirm:
 
 - package name is available on pub.dev;
-- `version: 0.1.0` appears in `pubspec.yaml`;
-- `CHANGELOG.md` starts with `## 0.1.0`;
-- README installation uses `nexio: ^0.1.0`;
+- `version: 0.2.0` appears in `pubspec.yaml`;
+- `CHANGELOG.md` starts with `## 0.2.0`;
+- README installation uses `nexio: ^0.2.0`;
 - homepage, repository, and issue tracker use valid HTTPS URLs;
 - `LICENSE` contains the MIT license and correct copyright owner;
 - Android and iOS are the declared V1 platforms.
@@ -137,9 +137,10 @@ After upload:
 2. Check README, Example, Changelog, Installing, Versions, and Scores tabs.
 3. Confirm API documentation generated successfully.
 4. Open every homepage/repository/issue link.
-5. Read the pub points report and fix server-only findings in `0.1.1`.
+5. Read the pub points report and fix server-only findings in `0.2.1`.
 
-You cannot replace or delete `0.1.0`; corrections require a new version.
+You cannot replace or delete a published release; corrections require a new
+version such as `0.2.1`.
 
 ## 7. Transfer to a Verified Publisher
 
